@@ -81,7 +81,7 @@ def extractCompress(file):
         res = os.system(command)
         if res == 0: return getFileList(path)
 
-def Search( item ):
+def Search(item):
     subtitles_list = []
 
     log(__name__ ,"Search for [%s] by name" % os.path.basename(item['file_original_path']))

@@ -5,24 +5,20 @@ import re
 import os
 import sys
 # import xbmc
-import urllib
-import urllib2
+import requests
 
 import zipfile
-from unrar import rarfile
+# from unrar import rarfile
 
-# import requests
+
 import shutil
 # import xbmcvfs
 # import xbmcaddon
 # import xbmcgui,xbmcplugin
 from bs4 import BeautifulSoup
 
-
-
-
-reload(sys)
-sys.setdefaultencoding('utf-8')
+# reload(sys)
+# sys.setdefaultencoding('utf-8')
 
 
 headers = {'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
@@ -32,10 +28,8 @@ headers = {'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,imag
            'Upgrade-Insecure-Requests': '1',
            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/55.0.2883.87 Safari/537.36'}
 
-
-
-ZIMUKU_API = 'http://www.zimuku.cn/search?q=%s'
-ZIMUKU_BASE = 'http://www.zimuku.cn'
+assrt_API = 'http://assrt.net/sub/?searchword=%s'
+assrt_BASE = 'http://assrt.net/'
 FLAG_DICT = {'china':'简', 'hongkong':'繁', 'uk':'英', 'jollyroger':'双语'}
 exts = [".srt", ".sub", ".smi", ".ssa", ".ass" ]
 
@@ -50,111 +44,114 @@ def getFileList(path):
             fileslist.append(path+d)
     return fileslist
 
-#解压缩Zip到指定文件夹
-def extractZip(zfile, path):
-    z = ZFile(zfile)
-    z.extract_to(path)
-    z.close()
-
-#解压缩rar到指定文件夹
-def extractRar(zfile, path):
-    rar_command1 = "WinRAR.exe x -ibck %s %s" % (zfile, path)
-    rar_command2 = r'"C:\WinRAR.exe" x -ibck %s %s' % (zfile, path)
-    if os.system(rar_command1) == 0:
-        print "Path OK."
-    else:
-        if os.system(rar_command2) != 0:
-            print "Error."
-        else:
-            print "Exe OK"
-
-def unZip(filepath):
+def extractCompress(file):
     path  = __temp__ + '/subtitles/'
     if os.path.isdir(path): shutil.rmtree(path)
     if not os.path.isdir(path): os.mkdir(path)
 
-    if filepath.lower().endswith('zip'):
-        zip_file = zipfile.ZipFile(filepath,'r')
-        for names in zip_file.namelist():
+    if file.lower().endswith('zip'):
+        zipFile = zipfile.ZipFile(file,'r')
+        for names in zipFile.namelist():
             if type(names) == str and names[-1] != '/':
                 utf8name = names.decode('gbk')
-                data = zip_file.read(names)
-                fo = open(path+utf8name, "w")
-                fo.write(data)
-                fo.close()
+                data = zipFile.read(names)
+                with open(path+utf8name, 'wb') as f: f.write(data)
             else:
-                zip_file.extract(names,path)
-        return getFileList(path)
-    if filepath.lower().endswith('rar'):
-        zip_file = rarfile.RarFile(filepath,'r')
-        for names in zip_file.namelist():
-            if type(names) == str and names[-1] != '/':
-                utf8name = names.decode('gbk')
-                data = zip_file.read(names)
-                fo = open(path+utf8name, "w")
-                fo.write(data)
-                fo.close()
-            else:
-                zip_file.extract(names,path)
+                zipFile.extract(names,path)
         return getFileList(path)
 
+    if file.lower().endswith('rar'):
+        if platform.system() == 'Windows':
+            rarPath = 'C:\Program Files\WinRAR'
+            sysPath = os.getenv('Path')
+            if 'winrar' not in sysPath.lower(): os.environ["Path"] = sysPath+';'+rarPath
+            command = "winrar x -ibck %s %s" % (file, path)
+        if platform.system() == 'Linux':
+            command = 'unrar x %s %s' % (file, path)
+        res = os.system(command)
+        if res == 0: return getFileList(path)
 
+def getUriLinks(url, page=1):
+    lists = []
+    try:
+        res = requests.get(url+'&page=%d' % page, headers=headers)
+    except: return
+    else:
+        soup = BeautifulSoup(res.content,'html.parser')
+        divs = soup.find_all('div',class_='subitem')
+        for i in divs:
+            title = i.find('a',class_='introtitle')
+            if title is None: continue
+            name = title.getText().strip().split('/')[-1]
+            link = title.get('href')
+            content = i.find('div',id='sublist_div').find_all('span')
+            for x in content:
+                if '语言' in x.getText():
+                    if '简' in x.getText() or '繁' in x.getText() or '双语' in x.getText():
+                        lang = '简'
+                        language_name = 'Chinese'
+                        language_flag = 'zh'
+                    elif '英' in x.getText():
+                        lang = '英'
+                        language_name = 'English'
+                        language_flag = 'en'
+                    else:
+                        lang = '未知'
+                        language_name = 'Chinese'
+                        language_flag = 'zh'
+                else:
+                    lang = '未知'
+                    language_name = 'Chinese'
+                    language_flag = 'zh'
+            lists.append({"language_name":language_name, "filename":name, "link":link, "language_flag":language_flag, "rating":"0", "lang":lang})
+
+        number = soup.find('div',class_='pagelinkcard')
+        if number is not None and page == 1:
+            number = number.find_all('a')
+            for i in number:
+                if i.getText() == '1' or i.getText() == '>' or '/' in i.getText(): continue
+                lists += getUriLinks(url, int(i.getText()))
+                print('获取到页码：',int(i.getText()))
+    return lists
 
 def Search():
     subtitles_list = []
 
-    # log( __name__ ,"Search for [%s] by name" % (os.path.basename( item['file_original_path'] ),))
-    # if item['mansearch']:
-    #     url = ZIMUKU_API % '最终幻想15：王者之剑'
-    # else:
-    url = ZIMUKU_API % 'the croods'
-    # url = ZIMUKU_API % '最终幻想15：王者之剑'
+    url = assrt_API % '终结者'
+    # url = assrt_API % '最终幻想15：王者之剑'
     try:
-        socket = urllib.urlopen(url)
-        data = socket.read()
-        socket.close()
-        soup = BeautifulSoup(data,'html.parser')
+        print(getUriLinks(url))
+        # print(len(getUriLinks(url,5)))
+        res = requests.get(url, headers=headers)
     except:
         return
-    results = soup.find_all("div", class_="item prel clearfix")
-    for it in results:
-        moviename = it.find("div", class_="title").a.text.encode('utf-8')
-        iurl = it.find("div", class_="title").a.get('href').encode('utf-8')
-        movieurl = '%s%s' % (ZIMUKU_BASE, iurl)
-        try:
-            socket = urllib.urlopen(movieurl)
-            data = socket.read()
-            socket.close()
-            soup = BeautifulSoup(data,'html.parser').find("table", class_="table")
-            soup = soup.find("tbody")
-        except:
-            return
-        subs = soup.find_all("tr")
-        # print(subs)
-        for sub in subs:
+    else:
+        soup = BeautifulSoup(res.content,'html.parser')
+        divs = soup.find_all('div',class_='subitem')
+        page = soup.find('div',class_='pagelinkcard')
+        for i in divs:
+            title = i.find('a',class_='introtitle')
+            if title is None: continue
+            name = title.getText().strip().split('/')[-1]
+            link = title.get('href')
+            content = i.find('div',id='sublist_div').find_all('span')
+            for x in content:
+                if '语言' in x.getText():
+                    if '简' in x.getText() or '繁' in x.getText() or '双语' in x.getText():
+                        lang = '简'
+                        language_name = 'Chinese'
+                        language_flag = 'zh'
+                    elif '英' in x.getText():
+                        lang = '英'
+                        language_name = 'English'
+                        language_flag = 'en'
+                    else:
+                        lang = '未知'
+                        language_name = 'Chinese'
+                        language_flag = 'zh'
 
-            name = sub.a.text.encode('utf-8')
-
-            flag = sub.img.get('src').split('/')[-1].split('.')[0].encode('utf-8')
-            lang = FLAG_DICT.get(flag,'unkonw')
-            link = '%s%s' % (ZIMUKU_BASE, sub.a.get('href').encode('utf-8'))
-
-            if lang == '英':
-                subtitles_list.append({"language_name":"English", "filename":name, "link":link, "language_flag":'en', "rating":"0", "lang":lang})
-            else:
-                subtitles_list.append({"language_name":"Chinese", "filename":name, "link":link, "language_flag":'zh', "rating":"0", "lang":lang})
+            subtitles_list.append({"language_name":language_name, "filename":name, "link":link, "language_flag":language_flag, "rating":"0", "lang":lang})
     return subtitles_list
-    for i in subtitles_list:
-        print i['filename']
-        print i["link"]
-        # extension = i['filename'].split('.')[-1]
-        # if extension in ['zip','Zip','rar','RAR']:
-        #     url = "plugin://%s/?action=download&link=%s&lang=%s&ext=%s" % ('__scriptid__',i["link"],i["lang"],extension)
-        # else:
-        #     url = "plugin://%s/?action=download&link=%s&lang=%s" % ('__scriptid__',i["link"],i["lang"])
-        # print url
-        # for j in i: print j,i[j]
-    # print subtitles_list
     # if subtitles_list:
     #     for it in subtitles_list:
     #         listitem = xbmcgui.ListItem(label=it["language_name"],
@@ -178,70 +175,46 @@ def Download(url):
     # try: os.makedirs(__temp__)
     # except: pass
 
-    subtitle_list = []
+    lists = []
     exts = [".srt", ".sub", ".smi", ".ssa", ".ass" ]
     try:
-        socket = urllib.urlopen(url)
-        data = socket.read()
-        soup = BeautifulSoup(data,'html.parser')
-        url = soup.find("li", class_="li dlsub").a.get('href').encode('utf-8')
+        res = requests.get(assrt_BASE+url,headers=headers)
+        soup = BeautifulSoup(res.content,'html.parser')
+        href = soup.find('div',class_='download').a.get('href')
 
-        socket = urllib.urlopen(url)
-        data = socket.read()
-        soup = BeautifulSoup(data,'html.parser')
-        div = soup.find('div',class_='down clearfix')
-        li = div.find('li')
-        headers['Referer'] = url
-
-        req = urllib2.Request(li.a.get('href'),headers=headers)
-        resp = urllib2.urlopen(req)
-
-        print(resp.headers['Content-Disposition'].replace('"','').split('=')[1])
-        print(resp.geturl())
-
-        socket = urllib.urlopen(resp.geturl())
-        data = socket.read()
-        socket.close()
+        headers['Referer'] = assrt_BASE+url
+        res = requests.get(assrt_BASE+href,headers=headers)
     except:
         return []
-
-    if len(data) < 1024:return []
-
-    tempfile = os.path.join(__temp__, "subtitles.zip")
-
-    with open(tempfile, "wb") as subFile: subFile.write(data)
-    subFile.close()
-    # xbmc.sleep(500)
-    lists = unZip(tempfile)
-    lists = [i for i in lists if i.split('.')[-1] in exts]
-
-
-
-
-    return lists
-    path = __temp__
-    dirs, files = xbmcvfs.listdir(path)
-    if len(dirs) > 0:
-        path = os.path.join(__temp__, dirs[0].decode('utf-8'))
-        dirs, files = xbmcvfs.listdir(path)
-    list = []
-    for subfile in files:
-        if (os.path.splitext( subfile )[1] in exts):
-            list.append(subfile.decode('utf-8'))
-    if len(list) == 1:
-        subtitle_list.append(os.path.join(path, list[0]))
     else:
-        sel = xbmcgui.Dialog().select('请选择压缩包中的字幕', list)
-        if sel == -1:
-            sel = 0
-        subtitle_list.append(os.path.join(path, list[sel]))
+        fileName = res.headers['Content-Disposition'].replace('"','').split('=')[1]
 
-    return subtitle_list
+        tempfile = os.path.join(__temp__, "subtitles.%s" % fileName.split('.')[-1])
+        # xbmc.log(tempfile)
+        with open(tempfile, "wb") as subFile: subFile.write(res.content)
+        # xbmc.sleep(100)
+        if fileName.split('.')[-1].lower() in ('zip','rar'):
+            lists = extractCompress(tempfile)
+        else:
+            lists = [tempfile]
+
+        lists = [i for i in lists if os.path.splitext(i)[1] in exts]
+
+    if len(lists) == 0: return []
+
+    if len(lists) == 1:
+        return lists[0]
+    else:
+        index = [i.split('/')[-1] for i in lists]
+        sel = xbmcgui.Dialog().select('请选择压缩包中的字幕', index)
+        if sel == -1: sel = 0
+        return lists[sel]
 
 
-unZip('subtitles.rar')
-# url = Search()
-# print(url)
+
+# unZip('subtitles.rar')
+url = Search()
+# print(url[0]['link'])
 # Download(url[0]['link'])
 # Download('http://www.zimuku.cn/detail/71607.html')
 
