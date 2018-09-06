@@ -10,6 +10,7 @@ import requests
 import zipfile
 # from unrar import rarfile
 
+import re
 
 import shutil
 # import xbmcvfs
@@ -109,65 +110,28 @@ def getUriLinks(url, page=1):
         if number is not None and page == 1:
             number = number.find_all('a')
             for i in number:
-                if i.getText() == '1' or i.getText() == '>' or '/' in i.getText(): continue
-                lists += getUriLinks(url, int(i.getText()))
-                print('获取到页码：',int(i.getText()))
+                if not re.match('\d+',i.getText()) or i.getText() == '1' or '/' in i.getText(): continue
+                lists.extend(getUriLinks(url, int(i.getText())))
     return lists
 
 def Search():
-    subtitles_list = []
-
     url = assrt_API % '终结者'
-    # url = assrt_API % '最终幻想15：王者之剑'
-    try:
-        print(getUriLinks(url))
-        # print(len(getUriLinks(url,5)))
-        res = requests.get(url, headers=headers)
-    except:
-        return
-    else:
-        soup = BeautifulSoup(res.content,'html.parser')
-        divs = soup.find_all('div',class_='subitem')
-        page = soup.find('div',class_='pagelinkcard')
-        for i in divs:
-            title = i.find('a',class_='introtitle')
-            if title is None: continue
-            name = title.getText().strip().split('/')[-1]
-            link = title.get('href')
-            content = i.find('div',id='sublist_div').find_all('span')
-            for x in content:
-                if '语言' in x.getText():
-                    if '简' in x.getText() or '繁' in x.getText() or '双语' in x.getText():
-                        lang = '简'
-                        language_name = 'Chinese'
-                        language_flag = 'zh'
-                    elif '英' in x.getText():
-                        lang = '英'
-                        language_name = 'English'
-                        language_flag = 'en'
-                    else:
-                        lang = '未知'
-                        language_name = 'Chinese'
-                        language_flag = 'zh'
+    links = getUriLinks(url)
+    if links:
+        for it in links:
+            listitem = xbmcgui.ListItem(label=it["language_name"],
+                                  label2=it["filename"],
+                                  iconImage=it["rating"],
+                                  thumbnailImage=it["language_flag"]
+                                  )
+            listitem.setProperty( "sync", "false" )
+            listitem.setProperty( "hearing_imp", "false" )
 
-            subtitles_list.append({"language_name":language_name, "filename":name, "link":link, "language_flag":language_flag, "rating":"0", "lang":lang})
-    return subtitles_list
-    # if subtitles_list:
-    #     for it in subtitles_list:
-    #         listitem = xbmcgui.ListItem(label=it["language_name"],
-    #                               label2=it["filename"],
-    #                               iconImage=it["rating"],
-    #                               thumbnailImage=it["language_flag"]
-    #                               )
-
-    #         listitem.setProperty( "sync", "false" )
-    #         listitem.setProperty( "hearing_imp", "false" )
-
-    #         url = "plugin://%s/?action=download&link=%s&lang=%s" % (__scriptid__,
-    #                                                                     it["link"],
-    #                                                                     it["lang"]
-    #                                                                     )
-    #         xbmcplugin.addDirectoryItem(handle=int(sys.argv[1]),url=url,listitem=listitem,isFolder=False)
+            url = "plugin://%s/?action=download&link=%s&lang=%s" % (__scriptid__,
+                                                                        it["link"],
+                                                                        it["lang"]
+                                                                        )
+            xbmcplugin.addDirectoryItem(handle=int(sys.argv[1]),url=url,listitem=listitem,isFolder=False)
 
 def Download(url):
     # try: shutil.rmtree(__temp__)
@@ -176,7 +140,6 @@ def Download(url):
     # except: pass
 
     lists = []
-    exts = [".srt", ".sub", ".smi", ".ssa", ".ass" ]
     try:
         res = requests.get(assrt_BASE+url,headers=headers)
         soup = BeautifulSoup(res.content,'html.parser')

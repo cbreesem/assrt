@@ -35,9 +35,9 @@ headers = {'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,imag
            'Upgrade-Insecure-Requests': '1',
            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/55.0.2883.87 Safari/537.36'}
 
-ZIMUKU_API = 'http://www.zimuku.cn/search?q=%s'
-ZIMUKU_BASE = 'http://www.zimuku.cn'
-FLAG_DICT = {'china':'简', 'hongkong':'繁', 'uk':'英', 'jollyroger':'双语'}
+assrt_API = 'http://assrt.net/sub/?searchword=%s'
+assrt_BASE = 'http://assrt.net/'
+exts = [".srt", ".sub", ".smi", ".ssa", ".ass" ]
 
 def log(module, msg):
     xbmc.log((u"%s::%s - %s" % (__scriptname__,module,msg,)).encode('utf-8'),level=xbmc.LOGDEBUG )
@@ -81,54 +81,60 @@ def extractCompress(file):
         res = os.system(command)
         if res == 0: return getFileList(path)
 
+def getUriLinks(url, page=1):
+    lists = []
+    try:
+        res = requests.get(url+'&page=%d' % page, headers=headers)
+    except: return
+    else:
+        soup = BeautifulSoup(res.content,'html.parser')
+        divs = soup.find_all('div',class_='subitem')
+        for i in divs:
+            title = i.find('a',class_='introtitle')
+            if title is None: continue
+            name = title.getText().strip().split('/')[-1]
+            link = title.get('href')
+            content = i.find('div',id='sublist_div').find_all('span')
+            for x in content:
+                if '语言' in x.getText():
+                    if '简' in x.getText() or '繁' in x.getText() or '双语' in x.getText():
+                        lang = '简'
+                        language_name = 'Chinese'
+                        language_flag = 'zh'
+                    elif '英' in x.getText():
+                        lang = '英'
+                        language_name = 'English'
+                        language_flag = 'en'
+                    else:
+                        lang = '未知'
+                        language_name = 'Chinese'
+                        language_flag = 'zh'
+                else:
+                    lang = '未知'
+                    language_name = 'Chinese'
+                    language_flag = 'zh'
+            lists.append({"language_name":language_name, "filename":name, "link":link, "language_flag":language_flag, "rating":"0", "lang":lang})
+
+        number = soup.find('div',class_='pagelinkcard')
+        if number is not None and page == 1:
+            number = number.find_all('a')
+            for i in number:
+                if not re.match('\d+',i.getText()) or i.getText() == '1' or '/' in i.getText(): continue
+                lists.extend(getUriLinks(url, int(i.getText())))
+    return lists
+
 def Search(item):
-    subtitles_list = []
 
     log(__name__ ,"Search for [%s] by name" % os.path.basename(item['file_original_path']))
-    if item['mansearch']:
-        url = ZIMUKU_API % (item['mansearchstr'])
-    else:
-        url = ZIMUKU_API % (item['title'])
-    try:
-        socket = urllib.urlopen(url)
-        data = socket.read()
-        socket.close()
-        soup = BeautifulSoup(data,'html.parser')
-    except:
-        return
-    results = soup.find_all("div", class_="item prel clearfix")
-    for it in results:
-        moviename = it.find("div", class_="title").a.text.encode('utf-8')
-        iurl = it.find("div", class_="title").a.get('href').encode('utf-8')
-        movieurl = '%s%s' % (ZIMUKU_BASE, iurl)
-        try:
-            socket = urllib.urlopen(movieurl)
-            data = socket.read()
-            socket.close()
-            soup = BeautifulSoup(data,'html.parser').find("table", class_="table")
-            soup = soup.find("tbody")
-        except:
-            return
-        subs = soup.find_all("tr")
-        for sub in subs:
-            name = sub.a.text.encode('utf-8')
-            flag = sub.img.get('src').split('/')[-1].split('.')[0].encode('utf-8')
-            lang = FLAG_DICT.get(flag,'unkonw')
-            link = '%s%s' % (ZIMUKU_BASE, sub.a.get('href').encode('utf-8'))
-
-            if lang == '英':
-                subtitles_list.append({"language_name":"English", "filename":name, "link":link, "language_flag":'en', "rating":"0", "lang":lang})
-            else:
-                subtitles_list.append({"language_name":"Chinese", "filename":name, "link":link, "language_flag":'zh', "rating":"0", "lang":lang})
-
-    if subtitles_list:
-        for it in subtitles_list:
+    url = assrt_API % (item['mansearchstr']) if item['mansearch'] else assrt_API % (item['title'])
+    links = getUriLinks(url)
+    if links:
+        for it in links:
             listitem = xbmcgui.ListItem(label=it["language_name"],
                                   label2=it["filename"],
                                   iconImage=it["rating"],
                                   thumbnailImage=it["language_flag"]
                                   )
-
             listitem.setProperty( "sync", "false" )
             listitem.setProperty( "hearing_imp", "false" )
 
@@ -144,41 +150,31 @@ def Download(url,lang):
     try: os.makedirs(__temp__)
     except: pass
 
-    exts = [".srt", ".sub", ".smi", ".ssa", ".ass" ]
+    lists = []
     try:
-        socket = urllib.urlopen( url )
-        data = socket.read()
-        soup = BeautifulSoup(data,'html.parser')
-        url = soup.find("li", class_="li dlsub").a.get('href').encode('utf-8')
-        socket = urllib.urlopen(url)
+        res = requests.get(assrt_BASE+url,headers=headers)
+        soup = BeautifulSoup(res.content,'html.parser')
+        href = soup.find('div',class_='download').a.get('href')
 
-        socket = urllib.urlopen(url)
-        data = socket.read()
-        soup = BeautifulSoup(data,'html.parser')
-        div = soup.find('div',class_='down clearfix')
-        li = div.find('li')
-        headers['Referer'] = url
-
-        req = urllib2.Request(li.a.get('href'),headers=headers)
-        resp = urllib2.urlopen(req)
-        fileName = resp.headers['Content-Disposition'].replace('"','').split('=')[1]
-
-        socket = urllib.urlopen(resp.geturl())
-        data = socket.read()
-        socket.close()
+        headers['Referer'] = assrt_BASE+url
+        res = requests.get(assrt_BASE+href,headers=headers)
     except:
         return []
-    if len(data) < 1024: return []
-    tempfile = os.path.join(__temp__, "subtitles.%s" % fileName.split('.')[-1])
-    xbmc.log(tempfile)
-    with open(tempfile, "wb") as subFile: subFile.write(data)
-    xbmc.sleep(100)
-    if fileName.split('.')[-1].lower() in ('zip','rar'):
-        lists = extractCompress(tempfile)
     else:
-        lists = [tempfile]
+        fileName = res.headers['Content-Disposition'].replace('"','').split('=')[1]
 
-    lists = [i for i in lists if os.path.splitext(i)[1] in exts]
+        tempfile = os.path.join(__temp__, "subtitles.%s" % fileName.split('.')[-1])
+        xbmc.log(tempfile)
+        with open(tempfile, "wb") as subFile: subFile.write(res.content)
+        xbmc.sleep(100)
+        if fileName.split('.')[-1].lower() in ('zip','rar'):
+            lists = extractCompress(tempfile)
+        else:
+            lists = [tempfile]
+
+        lists = [i for i in lists if os.path.splitext(i)[1] in exts]
+
+    if len(lists) == 0: return []
 
     if len(lists) == 1:
         return lists[0]
