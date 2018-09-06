@@ -5,7 +5,7 @@ import os
 import sys
 import xbmc
 import urllib
-import urllib2
+import requests
 import zipfile
 import platform
 import shutil
