@@ -59,27 +59,15 @@ def extractCompress(file):
     if os.path.isdir(path): shutil.rmtree(path)
     if not os.path.isdir(path): os.mkdir(path)
 
-    if file.lower().endswith('zip'):
-        zipFile = zipfile.ZipFile(file,'r')
-        for names in zipFile.namelist():
-            if type(names) == str and names[-1] != '/':
-                utf8name = names.decode('gbk')
-                data = zipFile.read(names)
-                with open(path+utf8name, 'wb') as f: f.write(data)
-            else:
-                zipFile.extract(names,path)
-        return getFileList(path)
-
-    if file.lower().endswith('rar'):
-        if platform.system() == 'Windows':
-            rarPath = 'C:\Program Files\WinRAR'
-            sysPath = os.getenv('Path')
-            if 'winrar' not in sysPath.lower(): os.environ["Path"] = sysPath+';'+rarPath
-            command = "winrar x -ibck %s %s" % (file, path)
-        if platform.system() == 'Linux':
-            command = 'unrar x %s %s' % (file, path)
-        res = os.system(command)
-        if res == 0: return getFileList(path)
+    if platform.system() == 'Windows':
+        rarPath = 'C:\Program Files\WinRAR'
+        sysPath = os.getenv('Path')
+        if 'winrar' not in sysPath.lower(): os.environ["Path"] = sysPath+';'+rarPath
+        command = "winrar x -ibck %s %s" % (file, path)
+    if platform.system() == 'Linux':
+        command = 'unrar x %s %s' % (file, path)
+    res = os.system(command)
+    if res == 0: return getFileList(path)
 
 def getUriLinks(url, page=1):
     lists = []
@@ -96,12 +84,13 @@ def getUriLinks(url, page=1):
             link = title.get('href')
             content = i.find('div',id='sublist_div').find_all('span')
             for x in content:
-                if '语言' in x.getText():
-                    if '简' in x.getText() or '繁' in x.getText() or '双语' in x.getText():
+                string = x.getText().encode("UTF-8")
+                if '语言' in string:
+                    if '简' in string or '繁' in string or '双语' in string:
                         lang = '简'
                         language_name = 'Chinese'
                         language_flag = 'zh'
-                    elif '英' in x.getText():
+                    elif '英' in string:
                         lang = '英'
                         language_name = 'English'
                         language_flag = 'en'
@@ -137,10 +126,9 @@ def Search(item):
                                   )
             listitem.setProperty( "sync", "false" )
             listitem.setProperty( "hearing_imp", "false" )
-
             url = "plugin://%s/?action=download&link=%s&lang=%s" % (__scriptid__,
                                                                         it["link"],
-                                                                        it["lang"]
+                                                                        it["lang"].decode('utf8')
                                                                         )
             xbmcplugin.addDirectoryItem(handle=int(sys.argv[1]),url=url,listitem=listitem,isFolder=False)
 
@@ -165,9 +153,11 @@ def Download(url,lang):
 
         tempfile = os.path.join(__temp__, "subtitles.%s" % fileName.split('.')[-1])
         xbmc.log(tempfile)
-        with open(tempfile, "wb") as subFile: subFile.write(res.content)
+        with open(tempfile, 'wb') as f:
+            f.write(res.content)
+            f.close()
         xbmc.sleep(100)
-        if fileName.split('.')[-1].lower() in ('zip','rar'):
+        if tempfile.split('.')[-1].lower() in ('zip','rar'):
             lists = extractCompress(tempfile)
         else:
             lists = [tempfile]
